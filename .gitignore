@@ -39,3 +39,17 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# local env
+.env
+.env.local
+
+# expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# supabase
+supabase/.branches
+supabase/.temp
