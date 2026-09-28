@@ -1,10 +1,17 @@
 import React from 'react';
-import { StripeProvider } from '@stripe/stripe-react-native';
+import { stripeModule, stripeNativeAvailable } from '@/lib/stripe';
 
 const publishableKey = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '';
 
-export const isStripeConfigured =
+const hasKey =
   publishableKey.startsWith('pk_test_') || publishableKey.startsWith('pk_live_');
+
+/**
+ * Stripe is usable only when BOTH a key is set and the native module is present.
+ * In Expo Go or on web the module is absent, so checkout runs its preview path
+ * instead of crashing on a missing native module.
+ */
+export const isStripeConfigured = hasKey && stripeNativeAvailable;
 
 /**
  * Wraps the app in Stripe's native provider so checkout can use the Payment
@@ -12,14 +19,18 @@ export const isStripeConfigured =
  * configured the provider is skipped entirely so the app still boots.
  */
 export function StripeProviderShell({ children }: { children: React.ReactNode }) {
-  if (!isStripeConfigured) {
+  if (!isStripeConfigured || !stripeModule?.StripeProvider) {
     if (__DEV__) {
       console.warn(
-        '[BruinWash] EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY is not set — checkout will run in preview mode.',
+        hasKey
+          ? '[BruinWash] Stripe native module unavailable (Expo Go or web) — checkout runs in preview mode.'
+          : '[BruinWash] EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY is not set — checkout runs in preview mode.',
       );
     }
     return <>{children}</>;
   }
+
+  const StripeProvider = stripeModule.StripeProvider;
 
   return (
     <StripeProvider

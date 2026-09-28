@@ -9,7 +9,7 @@
  * status screen shows confirmation arriving over Realtime.
  */
 import { useCallback, useRef, useState } from 'react';
-import { PaymentSheetError, useStripe } from '@stripe/stripe-react-native';
+import { useStripeSafe } from '@/lib/stripe';
 import { supabase } from '@/lib/supabase';
 import { friendlyError } from '@/lib/errors';
 import { isStripeConfigured } from '@/providers/StripeProviderShell';
@@ -61,7 +61,7 @@ export interface CheckoutPayment {
 
 export function useCheckoutPayment(): CheckoutPayment {
   const createOrder = useCreateOrder();
-  const { initPaymentSheet, presentPaymentSheet } = useStripe();
+  const { initPaymentSheet, presentPaymentSheet } = useStripeSafe();
   const [stage, setStage] = useState<CheckoutStage>('idle');
   const [error, setError] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -90,7 +90,9 @@ export function useCheckoutPayment(): CheckoutPayment {
           setLockedTotalCents(order.total_cents);
         }
 
-        if (!isStripeConfigured) {
+        // Preview mode: no Stripe key, or no Stripe native module (Expo Go, web).
+        // The order is created and tracked; only the card charge is skipped.
+        if (!isStripeConfigured || !initPaymentSheet || !presentPaymentSheet) {
           setStage('preview');
           return { kind: 'preview', orderId: id };
         }
@@ -123,7 +125,10 @@ export function useCheckoutPayment(): CheckoutPayment {
 
         const presented = await presentPaymentSheet();
         if (presented.error) {
-          if (presented.error.code === PaymentSheetError.Canceled) {
+          // Compared as a literal rather than importing PaymentSheetError: the
+          // Stripe module is absent in Expo Go and on web, and a top-level import
+          // of it takes the whole app down. 'Canceled' is the enum's own value.
+          if (presented.error.code === 'Canceled') {
             setStage('cancelled');
             return { kind: 'cancelled', orderId: id };
           }

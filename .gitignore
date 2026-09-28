@@ -53,3 +53,7 @@ expo-env.d.ts
 # supabase
 supabase/.branches
 supabase/.temp
+
+# supabase local
+supabase/.branches/
+supabase/.temp/
