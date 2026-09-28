@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
@@ -25,6 +25,60 @@ Notifications.setNotificationHandler({
   }),
 });
 
+interface RegistrationResult {
+  status: Notifications.PermissionStatus | null;
+  token: string | null;
+}
+
+/**
+ * Pure async registration: asks for permission, fetches the Expo push token, and
+ * saves it against the user. Deliberately holds no React state so the effect
+ * below can await it and only then touch state — setting state synchronously
+ * inside an effect body causes cascading renders.
+ */
+async function registerForPush(userId: string | undefined): Promise<RegistrationResult> {
+  // Push requires a physical device; a simulator has no APNs/FCM token.
+  if (!Device.isDevice) return { status: null, token: null };
+
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'Order updates',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#005581',
+    });
+  }
+
+  const existing = await Notifications.getPermissionsAsync();
+  let status = existing.status;
+  if (status !== 'granted') {
+    status = (await Notifications.requestPermissionsAsync()).status;
+  }
+  if (status !== 'granted') return { status, token: null };
+
+  const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+
+  try {
+    const pushToken = await Notifications.getExpoPushTokenAsync(
+      projectId ? { projectId } : undefined,
+    );
+
+    if (userId) {
+      const { error } = await supabase.rpc('register_push_token', {
+        p_token: pushToken.data,
+        p_platform: Platform.OS,
+        p_device_name: Device.deviceName ?? null,
+      });
+      if (error) console.warn('[push] could not save token:', error.message);
+    }
+
+    return { status, token: pushToken.data };
+  } catch (e) {
+    console.warn('[push] token request failed:', (e as Error).message);
+    return { status, token: null };
+  }
+}
+
 interface NotificationsState {
   permission: Notifications.PermissionStatus | null;
   token: string | null;
@@ -36,65 +90,33 @@ const Ctx = createContext<NotificationsState | undefined>(undefined);
 
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
   const { session } = useAuth();
+  const userId = session?.user.id;
   const [permission, setPermission] = useState<Notifications.PermissionStatus | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const registered = useRef<string | null>(null);
 
   const register = useCallback(async (): Promise<boolean> => {
-    // Push requires a physical device; a simulator has no APNs/FCM token.
-    if (!Device.isDevice) return false;
-
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'Order updates',
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#005581',
-      });
-    }
-
-    const existing = await Notifications.getPermissionsAsync();
-    let status = existing.status;
-    if (status !== 'granted') {
-      const asked = await Notifications.requestPermissionsAsync();
-      status = asked.status;
-    }
-    setPermission(status);
-    if (status !== 'granted') return false;
-
-    const projectId =
-      Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
-
-    try {
-      const pushToken = await Notifications.getExpoPushTokenAsync(
-        projectId ? { projectId } : undefined,
-      );
-      setToken(pushToken.data);
-
-      const userId = session?.user.id;
-      if (userId && registered.current !== pushToken.data) {
-        const { error } = await supabase.rpc('register_push_token', {
-          p_token: pushToken.data,
-          p_platform: Platform.OS,
-          p_device_name: Device.deviceName ?? null,
-        });
-        if (error) {
-          console.warn('[push] could not save token:', error.message);
-        } else {
-          registered.current = pushToken.data;
-        }
-      }
-      return true;
-    } catch (e) {
-      console.warn('[push] token request failed:', (e as Error).message);
-      return false;
-    }
-  }, [session?.user.id]);
+    const result = await registerForPush(userId);
+    setPermission(result.status);
+    setToken(result.token);
+    return result.token !== null;
+  }, [userId]);
 
   // Register once a user is signed in; the token belongs to an account.
   useEffect(() => {
-    if (session?.user.id) void register();
-  }, [session?.user.id, register]);
+    if (!userId) return;
+    let cancelled = false;
+
+    void (async () => {
+      const result = await registerForPush(userId);
+      if (cancelled) return;
+      setPermission(result.status);
+      setToken(result.token);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   // Deep-link on tap. Works both from a cold start and from the background.
   useEffect(() => {
@@ -124,7 +146,12 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     return () => sub.remove();
   }, []);
 
-  return <Ctx.Provider value={{ permission, token, register }}>{children}</Ctx.Provider>;
+  const value = useMemo<NotificationsState>(
+    () => ({ permission, token, register }),
+    [permission, token, register],
+  );
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function usePushNotifications(): NotificationsState {

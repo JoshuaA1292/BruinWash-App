@@ -18,13 +18,13 @@ export const PRICING = {
   liabilityCapCents: 2500,
 } as const;
 
-export const TIERS: ReadonlyArray<{
+export const TIERS: readonly {
   id: ServiceTier;
   name: string;
   tagline: string;
   includes: string;
   popular: boolean;
-}> = [
+}[] = [
   {
     id: 'standard',
     name: 'Wash & Dry',
