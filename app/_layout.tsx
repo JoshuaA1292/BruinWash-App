@@ -91,7 +91,7 @@ function RootNavigator() {
           <Stack.Screen name="(admin)" options={{ headerShown: false }} />
         </Stack.Protected>
 
-        <Stack.Screen name="order/[id]" options={{ title: 'Your order' }} />
+        <Stack.Screen name="order/[id]/index" options={{ title: 'Your order' }} />
         <Stack.Screen name="order/[id]/chat" options={{ title: 'Messages' }} />
         <Stack.Screen
           name="order/[id]/rate"
