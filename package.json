@@ -34,6 +34,7 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-svg": "15.15.4",
+    "react-native-worklets": "0.10.1",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
@@ -50,7 +51,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "doctor": "expo-doctor",
-    "typecheck:functions": "deno check supabase/functions/**/*.ts"
+    "typecheck:functions": "npx --yes deno@2 check supabase/functions/_shared/*.ts supabase/functions/*/index.ts"
   },
   "private": true
 }

@@ -7,13 +7,7 @@
     "icon": "./assets/icon.png",
     "scheme": "bruinwash",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "primaryColor": "#005581",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#005581"
-    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "app.campuswash.bruinwash",
@@ -21,7 +15,9 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "BruinWash uses your camera so washers can take a photo confirming laundry was delivered.",
         "NSPhotoLibraryUsageDescription": "BruinWash lets you attach a delivery photo or profile picture from your photo library.",
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -32,7 +28,11 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "permissions": ["CAMERA", "READ_MEDIA_IMAGES", "POST_NOTIFICATIONS"]
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -42,7 +42,14 @@
       "expo-router",
       "expo-secure-store",
       "expo-web-browser",
-      "expo-splash-screen",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#005581"
+        }
+      ],
       "expo-font",
       "expo-image",
       "expo-sqlite",

@@ -125,10 +125,27 @@ implementation had holes:
 
 ## Verification
 
+Everything below is green as of the last commit.
+
 ```bash
-npx tsc --noEmit                    # typecheck
+npx tsc --noEmit                    # app typecheck — 0 errors (typed routes active)
+npx expo lint                       # 0 problems
+npm run typecheck:functions         # deno check, all 8 Edge Function files
 ./supabase/tests/run_migrations.sh  # 99 assertions against real Postgres in Docker
+npx expo-doctor                     # 21/21 checks pass
+npx expo export --platform ios      # bundles: 2376 modules resolve
 ```
+
+Two of these are worth calling out. `expo export` is the one that proves the app
+actually *builds* — a typecheck will happily pass on an import that Metro cannot
+resolve. And the typed-route check only has teeth once `.expo/types/router.d.ts`
+exists, which `expo start` generates; with it in place, tsc validates every
+`href` in the app against the real route tree.
+
+Edge Functions are Deno, not React Native, so they are excluded from the app's
+tsconfig (otherwise it reports ~18 false errors: Deno resolves `.ts` imports and
+supplies the `Deno` global, neither of which the RN config knows about). They get
+their own `deno check`.
 
 The SQL test harness (`supabase/tests/`) stands up a throwaway Postgres 17
 container, stubs the parts of Supabase the migrations depend on (`auth.uid()`,

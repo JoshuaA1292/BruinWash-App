@@ -1,0 +1,16 @@
+{
+  "//": "Edge Functions run on Deno, not React Native. The app's tsconfig excludes this directory; typecheck these with `npm run typecheck:functions`.",
+  "compilerOptions": {
+    "strict": true,
+    "lib": ["deno.window", "dom"]
+  },
+  "lint": {
+    "rules": {
+      "tags": ["recommended"]
+    }
+  },
+  "fmt": {
+    "singleQuote": true,
+    "lineWidth": 100
+  }
+}
