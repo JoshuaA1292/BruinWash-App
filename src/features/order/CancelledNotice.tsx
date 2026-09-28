@@ -10,6 +10,12 @@ import { InfoRow } from './OrderSummary';
 /**
  * Terminal state for a cancelled order. refund_cents is whatever
  * cancel_order() decided from the Terms of Service tiers.
+ *
+ * The wording tracks the ACTUAL state of the money. cancel_order only queues a
+ * refund (public.refunds); process-refund performs it and the charge.refunded
+ * webhook settles payment_status. So the copy says "on its way" until
+ * payment_status confirms Stripe finished, and never claims money has landed
+ * before it has. An order that was never charged shows no refund line at all.
  */
 export function CancelledNotice({
   order,
@@ -18,7 +24,11 @@ export function CancelledNotice({
   order: OrderWithBuilding;
   cancelledByYou: boolean;
 }) {
-  const refunded = order.refund_cents > 0;
+  const refundDue = order.refund_cents > 0;
+  // Stripe has confirmed it only once the webhook moved payment_status.
+  const refundSettled =
+    order.payment_status === 'refunded' || order.payment_status === 'partially_refunded';
+  const neverCharged = order.payment_status === 'unpaid' || order.payment_status === 'processing';
 
   return (
     <Card style={styles.card}>
@@ -41,15 +51,27 @@ export function CancelledNotice({
       <View style={styles.refund}>
         <InfoRow label="Order total" value={formatCents(order.total_cents)} />
         <InfoRow
-          label={refunded ? 'Refund applied' : 'Refund'}
-          value={refunded ? formatCents(order.refund_cents) : 'None — washing had begun'}
+          label={refundSettled ? 'Refund issued' : refundDue ? 'Refund on its way' : 'Refund'}
+          value={
+            refundDue
+              ? formatCents(order.refund_cents)
+              : neverCharged
+                ? 'Nothing was charged'
+                : 'None — washing had begun'
+          }
           emphasis
         />
       </View>
 
-      {refunded ? (
+      {refundDue ? (
         <Text variant="micro" color={colors.textSubtle}>
-          Refunds land back on your original payment method, usually within 5–10 business days.
+          {refundSettled
+            ? 'Your refund has been sent back to your original payment method. Banks usually post it within 5–10 business days.'
+            : 'We are sending this back to your original payment method now. You will see it within 5–10 business days once your bank posts it.'}
+        </Text>
+      ) : neverCharged ? (
+        <Text variant="micro" color={colors.textSubtle}>
+          This order was never charged, so there is nothing to refund.
         </Text>
       ) : null}
 

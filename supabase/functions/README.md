@@ -17,6 +17,7 @@ deno check supabase/functions/**/*.ts   # or: npm run typecheck:functions
 | `stripe-webhook` | Stripe | **off — `--no-verify-jwt`** |
 | `connect-onboarding` | the washer earnings screen, and Stripe's browser redirect | **off — `--no-verify-jwt`** |
 | `admin-notify` | chained from `dispatch-push`, or pg_cron, or by hand | on (guards itself) |
+| `process-refund` | the `kick_refund_dispatch()` DB trigger (pg_net), or by hand | on (guards itself) |
 
 Shared code lives in `_shared/`: `cors.ts` (preflight + response helpers),
 `supabase.ts` (service-role client, caller verification, small utils) and
@@ -41,8 +42,17 @@ insert into public.app_config (key, value) values
 on conflict (key) do update set value = excluded.value;
 ```
 
-`app_config` has RLS on with **no policies**, so no app user can read it; only
-the service role and the `SECURITY DEFINER` function `public.cfg()` can.
+`app_config` has RLS on with **no policies**, so no app user can read it
+directly. `public.cfg()` is `SECURITY DEFINER` and therefore reads it regardless
+of RLS — which is exactly why migration `20260928000700_security_hardening.sql`
+revokes `EXECUTE` on `cfg()` from `PUBLIC` as well as from `anon`/`authenticated`.
+
+> Revoking from `anon, authenticated` alone is **not enough**. Postgres grants
+> `EXECUTE` on every new function to `PUBLIC` implicitly, and revoking from a
+> named role does not remove that grant. Before the fix, any signed-in student
+> could call `cfg('service_role_key')` over PostgREST and obtain a key that
+> bypasses every RLS policy in the project. `supabase/tests/10_policy_tests.sql`
+> asserts this stays revoked — do not remove those assertions.
 
 Check it is working:
 
@@ -295,6 +305,44 @@ $$);
 ```
 
 ---
+
+### `process-refund`
+
+Turns queued refunds into real Stripe refunds.
+
+`cancel_order()` never claims that money moved — it computes the refund from the
+Terms of Service tiers, writes `orders.refund_cents`, and inserts a row into
+`public.refunds` with status `pending`. This function is what actually calls
+Stripe, and the webhook's `charge.refunded` branch is what finally settles
+`orders.payment_status`. The order screen says "Refund on its way" until that
+happens, and "Refund issued" afterwards, so the UI never promises money has
+landed before it has.
+
+Two properties matter:
+
+- **Claiming.** `status` doubles as the claim: `update ... where status =
+  'pending'` is atomic per row, so two concurrent invocations cannot refund the
+  same order twice. A row that then fails is marked `failed` with the reason
+  rather than retried forever.
+- **Idempotency.** Every call carries `Idempotency-Key: refund_<order_id>`, so
+  even a retry that races past the claim cannot produce a second refund.
+
+The amount is re-read from the order row under the service role and clamped to
+`total_cents` — a queued amount is never trusted to exceed what was charged.
+
+A refund is only ever queued for an order whose `payment_status` is `paid` (or
+`partially_refunded`) and which has a `stripe_payment_intent_id`. An order
+abandoned at the payment sheet was never charged, so it produces no refund row at
+all.
+
+Check the queue:
+
+```sql
+select status, count(*) from public.refunds group by status;
+-- anything stuck will say why:
+select order_id, amount_cents, status, error from public.refunds
+ where status in ('pending', 'processing', 'failed');
+```
 
 ## Local development
 

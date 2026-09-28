@@ -49,6 +49,12 @@ export interface CheckoutPayment {
   busy: boolean;
   /** Set once create_order has succeeded, so a retry never double-books. */
   orderId: string | null;
+  /**
+   * The total the created order was priced at server-side. Stripe charges this
+   * figure, so the CTA must quote it rather than a live re-quote the order no
+   * longer reflects.
+   */
+  lockedTotalCents: number | null;
   pay: (input: CreateOrderInput) => Promise<CheckoutOutcome | null>;
   reset: () => void;
 }
@@ -59,6 +65,9 @@ export function useCheckoutPayment(): CheckoutPayment {
   const [stage, setStage] = useState<CheckoutStage>('idle');
   const [error, setError] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
+  // The total the created order was priced at. Stripe charges this, not whatever
+  // the live quote says afterwards, so the UI must quote it back.
+  const [lockedTotalCents, setLockedTotalCents] = useState<number | null>(null);
   const orderIdRef = useRef<string | null>(null);
   const runningRef = useRef(false);
 
@@ -78,6 +87,7 @@ export function useCheckoutPayment(): CheckoutPayment {
           id = order.id;
           orderIdRef.current = id;
           setOrderId(id);
+          setLockedTotalCents(order.total_cents);
         }
 
         if (!isStripeConfigured) {
@@ -144,6 +154,7 @@ export function useCheckoutPayment(): CheckoutPayment {
     error,
     busy: stage === 'creating' || stage === 'funding' || stage === 'sheet',
     orderId,
+    lockedTotalCents,
     pay,
     reset,
   };

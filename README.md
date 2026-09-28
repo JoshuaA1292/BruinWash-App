@@ -47,7 +47,7 @@ src/
 supabase/
   migrations/             schema, RLS, RPCs, triggers, seed
   functions/              Deno Edge Functions (Stripe, push dispatch)
-  tests/                  SQL test harness — 99 assertions
+  tests/                  SQL test harness — 137 assertions
 ```
 
 ## Architecture, briefly
@@ -75,7 +75,7 @@ view. Washers never see requester identity.
 
 ```bash
 npx tsc --noEmit                    # typecheck
-./supabase/tests/run_migrations.sh  # spins up Postgres in Docker, runs 99 assertions
+./supabase/tests/run_migrations.sh  # spins up Postgres in Docker, runs 137 assertions
 npx expo-doctor                     # dependency sanity
 ```
 

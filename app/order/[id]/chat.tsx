@@ -4,10 +4,12 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   StyleSheet,
   View,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Banner, Card, Screen, Text } from '@/components/ui';
 import { ChatBubble, ChatComposer, MessagingEmpty, WasherIdentity } from '@/features/messaging';
 import { useChat } from '@/hooks/useChat';
@@ -26,6 +28,7 @@ const REQUESTER_LABEL = 'Your customer';
 
 export default function OrderChat() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const insets = useSafeAreaInsets();
   const {
     messages,
     isLoading,
@@ -63,6 +66,23 @@ export default function OrderChat() {
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back to your order"
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={({ pressed }) => [styles.back, pressed && styles.backPressed]}
+        >
+          <Text variant="bodyStrong" color={colors.textOnPrimary}>
+            ‹  Back
+          </Text>
+        </Pressable>
+        <Text variant="heading" color={colors.textOnPrimary}>
+          Messages
+        </Text>
+        <View style={styles.headerSpacer} />
+      </View>
       <Screen
         scroll={false}
         contentStyle={styles.flush}
@@ -148,6 +168,18 @@ export default function OrderChat() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    backgroundColor: colors.primary,
+  },
+  back: { minWidth: 72 },
+  backPressed: { opacity: 0.6 },
+  headerSpacer: { minWidth: 72 },
   flush: { padding: 0, gap: 0 },
   identity: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
   loading: { paddingVertical: spacing.xxl },

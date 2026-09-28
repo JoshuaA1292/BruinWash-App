@@ -163,7 +163,7 @@ export default function ProfileSetup() {
             value={roomNumber}
             onChangeText={setRoomNumber}
             optional
-            hint="Never shared with your washer — it is only used for your own records."
+            hint="Only the washer who accepts your order sees this, and never anyone else. Pickup still happens at the end of the hall."
             placeholder="412B"
             autoCapitalize="characters"
           />

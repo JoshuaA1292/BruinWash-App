@@ -115,6 +115,21 @@ export function useChat(orderId: string | undefined): ChatThread {
     })();
   }, [messages, orderId, queryClient, ready, userId]);
 
+  // The chat push writes a notifications row with template_key 'chat_message'.
+  // /inbox deliberately never lists those, so opening the thread is the only
+  // place that can clear them -- otherwise they sit unread forever and the app
+  // icon badge can never return to zero.
+  useEffect(() => {
+    if (!ready || !orderId || !userId) return;
+    void supabase
+      .from('notifications')
+      .update({ read_at: new Date().toISOString() })
+      .eq('order_id', orderId)
+      .eq('user_id', userId)
+      .eq('template_key', 'chat_message')
+      .is('read_at', null);
+  }, [messages.length, orderId, ready, userId]);
+
   const sendMutation = useMutation({
     mutationFn: async (body: string) => {
       const trimmed = body.trim();

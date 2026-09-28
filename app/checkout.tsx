@@ -190,6 +190,14 @@ export default function Checkout() {
   const previewDone = payment.stage === 'preview' && payment.orderId !== null;
   const previewOrderId = payment.orderId;
 
+  // Once create_order has run, orders.total_cents is fixed and is exactly what
+  // create-payment-intent will charge. Editing the tip or promo after that point
+  // would re-price the on-screen quote while Stripe still charged the original
+  // amount, so the inputs lock and the CTA quotes the created order instead.
+  const orderLocked = payment.orderId !== null;
+  const inputsDisabled = blocked || payment.busy || orderLocked;
+  const chargeCents = payment.lockedTotalCents ?? figures.totalCents;
+
   const primary = previewDone
     ? {
         label: 'View order status',
@@ -206,8 +214,8 @@ export default function Checkout() {
             : isStripeConfigured
               ? 'Pay'
               : 'Create order · preview mode',
-        trailing: formatCents(figures.totalCents),
-        disabled: blocked || repricing,
+        trailing: formatCents(chargeCents),
+        disabled: blocked || (repricing && !orderLocked),
         onPress: onPay,
       };
 
@@ -297,7 +305,7 @@ export default function Checkout() {
           appliedCode={effectivePromoCode}
           appliedDiscountCents={figures.discountCents}
           error={promoRefusedByServer ? PROMO_INVALID_MESSAGE : promoError}
-          disabled={blocked || payment.busy}
+          disabled={inputsDisabled}
         />
 
         <TipSelector
@@ -306,10 +314,18 @@ export default function Checkout() {
           subtotalCents={tipBaseCents}
           customText={customTipText}
           onChangeCustomText={setCustomTipText}
-          disabled={payment.busy}
+          disabled={inputsDisabled}
         />
 
         <TotalsCard figures={figures} repricing={repricing} />
+
+        {orderLocked && payment.stage === 'cancelled' ? (
+          <Banner
+            tone="info"
+            title="Your order is reserved"
+            message={`Your tip and promo code are locked in at ${formatCents(chargeCents)} because the order is already created. Cancel and start again to change them.`}
+          />
+        ) : null}
 
         {priced.error ? (
           <Banner

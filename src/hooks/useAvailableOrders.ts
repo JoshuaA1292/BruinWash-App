@@ -4,19 +4,23 @@ import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { friendlyError } from '@/lib/errors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useOrdersRealtime } from '@/features/washer/useOrdersRealtime';
-import type { OrderWithBuilding } from '@/types/database';
+import type { AvailableOrder } from '@/types/database';
 
 export const availableOrdersKey = ['orders', 'available'] as const;
 export const washerJobsKey = ['orders', 'washer'] as const;
 
 /**
- * Unclaimed pending jobs.
+ * Unclaimed pending jobs, read from the public.available_orders VIEW rather than
+ * the orders table.
  *
- * Same-building matching is enforced by the orders_select RLS policy
- * (status = 'pending' AND washer_id IS NULL AND building_id = my_building_id()),
- * so this is a plain select — there is no client-side building filter to get
- * wrong. Nothing here touches public.profiles: a washer never sees who the
- * requester is.
+ * The view is deliberately narrow: no requester_id, no room_number, no notes. A
+ * washer has no business reading those for a job they have not accepted, and the
+ * orders_select policy no longer serves them the raw row. The view also filters
+ * to payment_status = 'paid', so a job can never appear that accept_order() would
+ * then refuse as unfunded.
+ *
+ * Same-building matching is inside the view, so there is no client-side building
+ * filter to get wrong.
  */
 export function useAvailableOrders() {
   const { profile } = useAuth();
@@ -29,16 +33,14 @@ export function useAvailableOrders() {
   const query = useQuery({
     queryKey: availableOrdersKey,
     enabled,
-    queryFn: async (): Promise<OrderWithBuilding[]> => {
+    queryFn: async (): Promise<AvailableOrder[]> => {
       const { data, error } = await supabase
-        .from('orders')
-        .select('*, buildings(id, name, slug)')
-        .eq('status', 'pending')
-        .is('washer_id', null)
+        .from('available_orders')
+        .select('*')
         .order('pickup_at', { ascending: true });
 
       if (error) throw error;
-      return (data ?? []) as unknown as OrderWithBuilding[];
+      return (data ?? []) as unknown as AvailableOrder[];
     },
   });
 

@@ -4,7 +4,7 @@ import { Button, Card, Text } from '@/components/ui';
 import { formatCents } from '@/constants/pricing';
 import { formatPickupTime } from '@/lib/format';
 import { colors, spacing } from '@/theme';
-import type { OrderWithBuilding } from '@/types/database';
+import type { AvailableOrder } from '@/types/database';
 import { DetailRow, Pill } from './Pieces';
 import { addonsLabel, floorLabel, loadsLabel, tierName, washSettingsLabel } from './jobText';
 import { estimateWasherPayoutCents } from './payout';
@@ -20,7 +20,7 @@ export function AvailableJobCard({
   accepting,
   disabled,
 }: {
-  order: OrderWithBuilding;
+  order: AvailableOrder;
   onAccept: () => void;
   accepting: boolean;
   disabled?: boolean;
@@ -32,7 +32,7 @@ export function AvailableJobCard({
     <Card>
       <View style={styles.header}>
         <Text variant="heading" color={colors.text} style={styles.title}>
-          {order.buildings?.name ?? 'Your building'}
+          {order.building_name}
         </Text>
         <Pill label={tierName(order.tier)} />
       </View>

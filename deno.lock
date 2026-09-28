@@ -43,6 +43,7 @@
         "npm:react-native-safe-area-context@5.7",
         "npm:react-native-screens@4.26",
         "npm:react-native-svg@15.15.4",
+        "npm:react-native-worklets@0.10.1",
         "npm:react-native@0.86.3",
         "npm:react@19.2.3",
         "npm:typescript@~6.0.3",

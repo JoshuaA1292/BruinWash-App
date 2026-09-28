@@ -53,6 +53,11 @@ create publication supabase_realtime;
 
 grant usage on schema public, auth, storage to anon, authenticated, service_role;
 
+-- Supabase grants authenticated broad access to storage.objects and relies on
+-- bucket policies to restrict it. Mirror that so the tests exercise the policies.
+grant select, insert, update, delete on storage.objects to authenticated;
+grant select on storage.buckets to authenticated;
+
 -- Supabase grants broad table privileges to anon/authenticated and relies on
 -- RLS to restrict rows. Mirror that here so our tests exercise RLS, not GRANTs.
 alter default privileges in schema public grant all on tables    to anon, authenticated;

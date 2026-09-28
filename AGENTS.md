@@ -83,7 +83,7 @@ faithful translation of the web product, not a redesign.
 
 ```bash
 npx tsc --noEmit                    # must pass clean
-./supabase/tests/run_migrations.sh  # 99+ assertions, must all pass
+./supabase/tests/run_migrations.sh  # 137 assertions, must all pass
 ```
 
 If you change anything under `supabase/migrations/`, add an assertion to

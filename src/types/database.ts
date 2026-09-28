@@ -239,3 +239,30 @@ export interface EarningsSummary {
   lifetime_cents: number;
   order_count: number;
 }
+
+/**
+ * A row of the public.available_orders view — the washer job board.
+ *
+ * Deliberately narrower than Order: no requester_id, no room_number, no notes.
+ * A washer has no business reading those for a job they have not accepted, and
+ * RLS no longer serves them the raw order row. The view also filters to paid
+ * orders only, so nothing on the board can be refused as unfunded.
+ */
+export interface AvailableOrder {
+  id: string;
+  building_id: string;
+  building_name: string;
+  floor: string;
+  pickup_at: string;
+  tier: ServiceTier;
+  load_count: number;
+  add_detergent_pods: boolean;
+  add_gloves: boolean;
+  wash_cycle: string;
+  wash_temp: string;
+  dry_level: string;
+  service_fee_cents: number;
+  machine_cost_cents: number;
+  tip_cents: number;
+  created_at: string;
+}

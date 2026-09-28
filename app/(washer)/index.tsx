@@ -11,7 +11,7 @@ import { useAvailableOrders } from '@/hooks/useAvailableOrders';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 import { colors, spacing } from '@/theme';
-import type { OrderWithBuilding } from '@/types/database';
+import type { AvailableOrder } from '@/types/database';
 
 const EMPTY_TITLE = 'Nothing to pick up yet';
 const EMPTY_BODY = "No orders in your building right now — we'll notify you.";
@@ -44,7 +44,7 @@ export default function WasherAvailableScreen() {
   const hasPinned =
     !isSupabaseConfigured || buildingMissing || onboardingPending || Boolean(acceptError) || Boolean(loadError);
 
-  const renderItem = ({ item }: { item: OrderWithBuilding }) => (
+  const renderItem = ({ item }: { item: AvailableOrder }) => (
     <AvailableJobCard
       order={item}
       onAccept={() => accept(item.id)}

@@ -92,7 +92,11 @@ function RootNavigator() {
         </Stack.Protected>
 
         <Stack.Screen name="order/[id]/index" options={{ title: 'Your order' }} />
-        <Stack.Screen name="order/[id]/chat" options={{ title: 'Messages' }} />
+        {/* No native header: the chat screen draws its own inside the
+            KeyboardAvoidingView. With a native header present, RN measures the
+            KAV frame parent-relative while the keyboard height is screen-relative,
+            so the composer ends up partly under the keyboard on iOS. */}
+        <Stack.Screen name="order/[id]/chat" options={{ headerShown: false }} />
         <Stack.Screen
           name="order/[id]/rate"
           options={{ presentation: 'modal', title: 'Rate your washer' }}

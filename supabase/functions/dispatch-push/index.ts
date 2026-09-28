@@ -42,6 +42,9 @@ const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 /** The Expo Push API accepts at most 100 messages per request. */
 const EXPO_BATCH_SIZE = 100;
 /** Ceiling on one invocation, so a backlog cannot blow the function timeout. */
+/** template_key on the push-only rows written for a manual chat message. */
+const CHAT_TEMPLATE_KEY = 'chat_message';
+
 const MAX_ROWS_PER_RUN = 200;
 /**
  * Expo rejects an entire batch when one `to` value is malformed, which would
@@ -186,12 +189,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
       tokensByUser.set(t.user_id, list);
     }
 
-    // Badge = the recipient's unread feed count, so the app icon matches /inbox.
+    // Badge = the recipient's unread FEED count, so the app icon matches what
+    // /inbox actually shows. chat_message rows are excluded: they exist only to
+    // carry a push, the feed never lists them, and so nothing there can clear
+    // them -- counting them left a badge the user could never zero out.
     const badgeByUser = new Map<string, number>();
     const { data: unreadRows } = await admin
       .from('notifications')
       .select('user_id')
       .is('read_at', null)
+      .neq('template_key', CHAT_TEMPLATE_KEY)
       .in('user_id', recipients)
       .limit(5000);
     for (const r of (unreadRows ?? []) as { user_id: string }[]) {

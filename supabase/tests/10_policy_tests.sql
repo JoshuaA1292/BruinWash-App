@@ -42,6 +42,18 @@ exception
     end if;
 end $$;
 
+-- Marks an order paid the way the Stripe webhook does, and stamps a payment
+-- intent so a refund has something to reverse. SECURITY DEFINER because clients
+-- deliberately cannot write payment columns.
+create or replace function t.pay(p_order_id uuid)
+returns void language plpgsql security definer as $$
+begin
+  update public.orders
+     set payment_status = 'paid',
+         stripe_payment_intent_id = 'pi_test_' || replace(p_order_id::text, '-', '')
+   where id = p_order_id;
+end $$;
+
 create or replace function t.act_as(p_uid uuid)
 returns void language plpgsql as $$
 begin
@@ -262,13 +274,28 @@ end $$;
 set role authenticated;
 select t.act_as(:wash_a);
 do $$ begin
-  perform t.ok((select count(*) = 1 from public.orders), 'same-building washer sees the pending order');
+  -- The job board is a narrow view. The washer must NOT be able to read the raw
+  -- order row for a job they have not accepted -- it carries room_number and notes.
+  perform t.ok((select count(*) = 1 from public.available_orders),
+               'same-building washer sees the pending job on the job board');
+  perform t.ok((select count(*) = 0 from public.orders),
+               'washer canNOT read the raw order row before accepting it');
+  perform t.raises(
+    $q$ select room_number from public.available_orders $q$,
+    '%room_number%does not exist%',
+    'the job board does not expose room_number at all'
+  );
+  perform t.raises(
+    $q$ select requester_id from public.available_orders $q$,
+    '%requester_id%does not exist%',
+    'the job board does not expose requester_id at all'
+  );
 end $$;
 
 select t.act_as(:wash_x);
 do $$ begin
-  perform t.ok((select count(*) = 0 from public.orders),
-               'washer in another building cannot see the order at all');
+  perform t.ok((select count(*) = 0 from public.available_orders),
+               'washer in another building sees nothing on the job board');
 end $$;
 
 -- One-way visibility: a washer must never read a requester's profile.
@@ -444,9 +471,28 @@ begin
     'delivery cannot be marked complete without photo proof'
   );
 
+  -- A path alone proves nothing: the object has to exist, and it has to live
+  -- under this order's folder. Otherwise a washer closes a delivery and
+  -- triggers their own payout with no photo at all.
+  perform t.raises(
+    format($q$ select public.advance_order_status(%L, 'delivered', 'anything') $q$, v_o),
+    '%does not belong to this order%',
+    'a delivery photo path outside the order folder is rejected'
+  );
+  perform t.raises(
+    format($q$ select public.advance_order_status(%L, 'delivered', %L) $q$,
+           v_o, v_o::text || '/never-uploaded.jpg'),
+    '%upload did not complete%',
+    'a delivery photo path with no uploaded object is rejected'
+  );
+
+  -- Now simulate what a real upload leaves behind.
+  insert into storage.objects (bucket_id, name)
+  values ('delivery-proof', v_o::text || '/proof.jpg');
+
   perform public.advance_order_status(v_o, 'delivered', v_o::text || '/proof.jpg');
   perform t.ok((select status = 'delivered' from public.orders where id = v_o),
-               'order reaches delivered with photo proof attached');
+               'order reaches delivered with a real photo proof attached');
 end $$;
 
 -- A washer must not be able to drive someone else's order.
@@ -603,6 +649,23 @@ reset role;
 -- ---------------------------------------------------------------------------
 -- 12. Cancellation refund tiers (live Terms of Service, section 11)
 -- ---------------------------------------------------------------------------
+-- An order abandoned at the payment sheet was never charged, so cancelling it
+-- must NOT promise a refund. Previously it reported the full total back.
+set role authenticated;
+select t.act_as(:req_a);
+do $$
+declare
+  v_b uuid := (select id from public.buildings where slug = 'dykstra');
+  o0 public.orders;
+begin
+  o0 := public.create_order(v_b, '3', null, now() + interval '9 hours', 'standard', true);
+  o0 := public.cancel_order(o0.id, 'never paid');
+  perform t.ok(o0.refund_cents = 0, 'cancelling an UNPAID order promises no refund');
+  perform t.ok((select count(*) = 0 from public.refunds where order_id = o0.id),
+               'no refund is queued for an order that was never charged');
+end $$;
+reset role;
+
 set role authenticated;
 select t.act_as(:req_a);
 do $$
@@ -612,11 +675,15 @@ declare
 begin
   -- More than 2 hours out: full refund.
   o1 := public.create_order(v_b, '3', null, now() + interval '3 hours', 'standard', true);
+  perform t.pay(o1.id);
   o1 := public.cancel_order(o1.id, 'changed my mind');
   perform t.ok(o1.refund_cents = o1.total_cents, 'cancelling >2h before pickup refunds in full');
+  perform t.ok((select amount_cents = o1.total_cents from public.refunds where order_id = o1.id),
+               'a refund is actually QUEUED for the money to move');
 
   -- Inside 2 hours: 50%.
   o2 := public.create_order(v_b, '3', null, now() + interval '90 minutes', 'standard', true);
+  perform t.pay(o2.id);
   o2 := public.cancel_order(o2.id, 'too late');
   perform t.ok(o2.refund_cents = round(o2.total_cents * 0.5)::int,
                'cancelling <2h before pickup refunds 50%');
@@ -732,5 +799,239 @@ begin
                    and order_id = current_setting('bw.test_order3')::uuid),
                'a washer who did not mute alerts still is notified');
 end $$;
+
+
+-- ===========================================================================
+-- 15. Security hardening (migration 20260928000700). Every assertion below
+--     corresponds to a defect found by adversarial review.
+-- ===========================================================================
+
+-- --- CRITICAL: SECURITY DEFINER helpers must not be callable by app users. ---
+-- `revoke ... from anon, authenticated` does NOT strip the implicit grant to
+-- PUBLIC, so these were all reachable over PostgREST. cfg() handed out the
+-- service-role key, which bypasses every policy in this file.
+insert into public.app_config (key, value)
+values ('canary', 'SUPER-SECRET')
+on conflict (key) do update set value = excluded.value;
+
+do $$ begin
+  perform t.ok(
+    has_function_privilege('authenticated', 'public.cfg(text)', 'execute') = false,
+    'cfg() is NOT executable by authenticated (service-role key stays secret)');
+  perform t.ok(
+    has_function_privilege('anon', 'public.cfg(text)', 'execute') = false,
+    'cfg() is NOT executable by anon');
+  perform t.ok(
+    has_function_privilege('authenticated', 'public.price_cents(text)', 'execute') = false,
+    'price_cents() is NOT executable by authenticated');
+  perform t.ok(
+    has_function_privilege('authenticated',
+      'public.enqueue_notification(uuid,uuid,text,jsonb,text)', 'execute') = false,
+    'enqueue_notification() is NOT executable by authenticated (no forged pushes)');
+  perform t.ok(
+    has_function_privilege('authenticated', 'public.kick_push_dispatch()', 'execute') = false,
+    'kick_push_dispatch() is NOT executable by authenticated');
+  perform t.ok(
+    has_function_privilege('authenticated', 'public.render_template(text,jsonb)', 'execute') = false,
+    'render_template() is NOT executable by authenticated');
+
+  -- ...while the intended client surface stays reachable.
+  perform t.ok(
+    has_function_privilege('authenticated', 'public.accept_order(uuid)', 'execute'),
+    'accept_order() is still executable by authenticated');
+  perform t.ok(
+    has_function_privilege('authenticated',
+      'public.price_order(service_tier,int,boolean,boolean,int,text)', 'execute'),
+    'price_order() is still executable by authenticated');
+  perform t.ok(
+    has_function_privilege('authenticated', 'public.is_admin()', 'execute'),
+    'is_admin() stays executable — RLS policies evaluate it as the caller');
+end $$;
+
+set role authenticated;
+select t.act_as(:req_a);
+do $$ begin
+  perform t.raises(
+    $q$ select public.cfg('canary') $q$,
+    '%permission denied%',
+    'a signed-in student calling cfg() is refused at runtime'
+  );
+  perform t.ok((select count(*) = 0 from public.app_config),
+               'app_config itself is unreadable by app users');
+end $$;
+reset role;
+
+-- --- HIGH: a chat participant must not be able to rewrite the other's words ---
+set role authenticated;
+select t.act_as(:wash_a);
+do $$
+declare v_o uuid := (select id from public.orders_all_for_test);
+begin
+  perform t.raises(
+    format($q$ update public.messages set body = 'I said keep the $40'
+                where order_id = %L $q$, v_o),
+    '%permission denied%',
+    'the washer cannot rewrite the requester''s chat message'
+  );
+  -- Marking the other party's message read is still allowed.
+  perform t.ok(
+    has_column_privilege('authenticated', 'public.messages', 'read_at', 'update'),
+    'read_at is still updatable, so read receipts keep working');
+  perform t.ok(
+    has_column_privilege('authenticated', 'public.messages', 'body', 'update') = false,
+    'the message body column is not updatable by anyone');
+end $$;
+reset role;
+
+-- --- MEDIUM: avatars must not be world-readable to every signed-in user -----
+insert into storage.objects (bucket_id, name)
+values ('avatars', '11111111-1111-1111-1111-111111111111/face.jpg'),
+       ('avatars', '22222222-2222-2222-2222-222222222222/face.jpg')
+on conflict do nothing;
+
+set role authenticated;
+select t.act_as(:wash_a);
+do $$ begin
+  perform t.ok((select count(*) = 0 from storage.objects
+                 where bucket_id = 'avatars'
+                   and name like '11111111-1111-1111-1111-111111111111/%'),
+               'a washer cannot read the requester''s avatar (one-way visibility)');
+  perform t.ok((select count(*) = 1 from storage.objects
+                 where bucket_id = 'avatars'
+                   and name like '22222222-2222-2222-2222-222222222222/%'),
+               'a washer can still read their own avatar');
+end $$;
+
+select t.act_as(:req_a);
+do $$ begin
+  perform t.ok((select count(*) = 1 from storage.objects
+                 where bucket_id = 'avatars'
+                   and name like '22222222-2222-2222-2222-222222222222/%'),
+               'a requester CAN read the avatar of a washer on their order');
+end $$;
+reset role;
+
+-- --- HIGH: the time tier must dominate for a pre-pickup cancellation -------
+-- An accepted order cancelled days before pickup was being charged the 50% fee,
+-- contradicting the policy text the cancellation dialog shows.
+set role authenticated;
+select t.act_as(:req_a);
+do $$
+declare
+  v_b uuid := (select id from public.buildings where slug = 'dykstra');
+  o public.orders;
+begin
+  o := public.create_order(v_b, '3', null, now() + interval '2 days', 'standard', true);
+  perform t.pay(o.id);
+  perform set_config('bw.accepted_order', o.id::text, false);
+end $$;
+select t.act_as(:wash_a);
+do $$ begin
+  perform public.accept_order(current_setting('bw.accepted_order')::uuid);
+end $$;
+select t.act_as(:req_a);
+do $$
+declare o public.orders;
+begin
+  o := public.cancel_order(current_setting('bw.accepted_order')::uuid, 'plans changed');
+  perform t.ok(o.refund_cents = o.total_cents,
+               'an ACCEPTED order cancelled >2h before pickup still refunds in full');
+end $$;
+reset role;
+
+-- --- MEDIUM: a promo code must not be burned by an unpaid order ------------
+insert into public.promo_codes (code, kind, value, max_redemptions, per_user_limit)
+values ('ONCEONLY', 'percent', 10, 50, 1);
+
+set role authenticated;
+select t.act_as(:req_a);
+do $$
+declare
+  v_b uuid := (select id from public.buildings where slug = 'dykstra');
+  o public.orders;
+begin
+  o := public.create_order(v_b, '3', null, now() + interval '3 days', 'standard', true,
+                           1, false, false, 0, 'ONCEONLY');
+  perform t.ok(o.discount_cents > 0, 'the promo discount is applied to the order');
+  perform t.ok((select count(*) = 0 from public.promo_redemptions where code = 'ONCEONLY'),
+               'an UNPAID order does not consume the promo redemption');
+  perform set_config('bw.promo_order', o.id::text, false);
+end $$;
+reset role;
+
+-- promo_codes is admin-only under RLS, so read the counter outside that role.
+do $$ begin
+  perform t.ok((select redemption_count = 0 from public.promo_codes where code = 'ONCEONLY'),
+               'the redemption counter is untouched until payment clears');
+end $$;
+
+select t.pay(current_setting('bw.promo_order')::uuid);
+
+do $$ begin
+  perform t.ok((select count(*) = 1 from public.promo_redemptions where code = 'ONCEONLY'),
+               'the redemption is recorded once the order is paid');
+  perform t.ok((select redemption_count = 1 from public.promo_codes where code = 'ONCEONLY'),
+               'the redemption counter increments on payment');
+end $$;
+
+-- Paying twice (a Stripe retry) must not double-count the redemption.
+select t.pay(current_setting('bw.promo_order')::uuid);
+do $$ begin
+  perform t.ok((select redemption_count = 1 from public.promo_codes where code = 'ONCEONLY'),
+               'a repeated paid transition does not double-count the redemption');
+end $$;
+
+-- --- MEDIUM: a discount may consume the margin, never the machine cost -----
+-- Otherwise the washer's machine reimbursement comes out of the platform's
+-- pocket, and the charge can fall under Stripe's 50-cent minimum.
+insert into public.promo_codes (code, kind, value, per_user_limit)
+values ('FREEWASH', 'fixed', 100000, 99);
+
+do $$
+declare p jsonb;
+begin
+  p := public.price_order('full', 1, false, false, 0, 'FREEWASH');
+  perform t.ok((p->>'discount_cents')::int = 1499,
+               'an oversized discount is capped at the service fee, not the whole base');
+  perform t.ok((p->>'subtotal_cents')::int = 250,
+               'the machine cost survives any discount');
+  perform t.ok((p->>'total_cents')::int >= 50,
+               'the total can never fall below Stripe''s 50-cent minimum');
+end $$;
+
+-- --- MEDIUM: an unpaid order must never reach the washer job board ---------
+set role authenticated;
+select t.act_as(:req_a);
+do $$
+declare
+  v_b uuid := (select id from public.buildings where slug = 'dykstra');
+  o public.orders;
+begin
+  o := public.create_order(v_b, '7', null, now() + interval '5 days', 'full', true);
+  perform set_config('bw.unpaid_order', o.id::text, false);
+end $$;
+
+select t.act_as(:wash_a);
+do $$ begin
+  perform t.ok((select count(*) = 0 from public.available_orders
+                 where id = current_setting('bw.unpaid_order')::uuid),
+               'an unpaid order is NOT offered on the job board');
+  perform t.raises(
+    format($q$ select public.accept_order(%L) $q$, current_setting('bw.unpaid_order')),
+    '%not paid yet%',
+    'and accepting it is refused server-side too'
+  );
+end $$;
+reset role;
+
+select t.pay(current_setting('bw.unpaid_order')::uuid);
+set role authenticated;
+select t.act_as(:wash_a);
+do $$ begin
+  perform t.ok((select count(*) = 1 from public.available_orders
+                 where id = current_setting('bw.unpaid_order')::uuid),
+               'once paid, the same order appears on the job board');
+end $$;
+reset role;
 
 select '---- all assertions passed ----' as result;

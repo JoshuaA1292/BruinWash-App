@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { friendlyError } from '@/lib/errors';
 import type { Profile, UserRole } from '@/types/database';
 
 interface AuthState {
@@ -8,6 +9,12 @@ interface AuthState {
   profile: Profile | null;
   /** True until the stored session has been restored — gate navigation on this. */
   initializing: boolean;
+  /**
+   * Set when we have a session but could not load its profile (offline cold
+   * start, transient PostgREST error). Without surfacing this the user lands on
+   * a permanently blank screen, because every route guard keys off `profile`.
+   */
+  profileError: string | null;
   role: UserRole | null;
   isRequester: boolean;
   isWasher: boolean;
@@ -24,23 +31,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [initializing, setInitializing] = useState(true);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   const loadProfile = useCallback(async (userId: string | undefined) => {
     if (!userId) {
       setProfile(null);
+      setProfileError(null);
       return;
     }
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle();
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
 
-    if (error) {
-      console.warn('[auth] could not load profile:', error.message);
-      return;
+      if (error) {
+        setProfileError(friendlyError(error, 'We could not load your profile.'));
+        return;
+      }
+      setProfile((data as Profile | null) ?? null);
+      setProfileError(null);
+    } catch (e) {
+      setProfileError(friendlyError(e, 'We could not reach CampusWash. Check your connection.'));
     }
-    setProfile((data as Profile | null) ?? null);
   }, []);
 
   useEffect(() => {
@@ -73,6 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
     setProfile(null);
+    setProfileError(null);
   }, []);
 
   const value = useMemo<AuthState>(() => {
@@ -81,6 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       session,
       profile,
       initializing,
+      profileError,
       role,
       isRequester: role === 'requester',
       isWasher: role === 'washer',
@@ -89,7 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refreshProfile,
       signOut,
     };
-  }, [session, profile, initializing, refreshProfile, signOut]);
+  }, [session, profile, initializing, profileError, refreshProfile, signOut]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
