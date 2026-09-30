@@ -6,13 +6,14 @@ row-level security, real Supabase Realtime. Only the card charge is simulated
 
 ## Get in
 
-**Phone (Expo Go)** — sign into Expo Go with the same account as the computer
-(`jp12345`), and the project appears under **"Development servers"** on Expo Go's
-home screen. Tap it. Or enter the URL manually:
+**Phone (Expo Go)** — sign into Expo Go with the same Expo account you are logged
+into on the computer (`npx expo whoami` to check). The project then appears under
+**"Development servers"** on Expo Go's home screen; just tap it.
 
-```
-exp://qt8kgiq-jp12345-8081.exp.direct
-```
+If you would rather type the URL, `npx expo start --tunnel` prints it. It is of
+the form `exp://<random>-<account>-8081.exp.direct` and **changes on every
+restart**, which is why it is not written down here — a tunnel URL in a public
+repo is a live route into your dev server.
 
 **Computer (browser)** — press `w` in the Expo terminal, or open
 http://localhost:8081. Fastest way to poke around, and it's how you run two
